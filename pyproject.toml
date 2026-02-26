@@ -1,7 +1,7 @@
 [project]
-name = "YA_MCPServer_Template"
-version = "0.1.0"
-description = "YA MCP Server Template"
+name = "YA_MCPServer_TravelAssistant"
+version = "1.0.0"
+description = "A travel assistant MCP server that provides weather, attractions and hotel information."
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
