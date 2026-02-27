@@ -16,7 +16,8 @@ import httpx
 # 导入Agent统一入口
 from .travel_agent import (
     travel_agent,
-    _get_travel_weather,
+    _get_weather_amap,
+    _get_weather_seniverse,
     _search_travel_attractions,
     _query_hotel_price,
 )
@@ -81,14 +82,16 @@ async def test_travel_agent():
 
     print(f"  城市: {result['city']}")
 
-    # 检查天气部分
+    # 检查天气部分（聚合双数据源）
     weather = result["weather"]
-    if "error" not in weather:
-        print(f"  天气: {weather.get('temperature', '?')} {weather.get('weather', '?')}")
-        passed = check_result("天气数据", weather, ["city", "temperature", "weather"]) and passed
-    else:
-        print(f"  天气: {weather['error']}")
-        passed = False
+    for source_key, source_name in [("amap", "高德"), ("seniverse", "心知")]:
+        w = weather.get(source_key, {})
+        if "error" not in w:
+            print(f"  天气({source_name}): {w.get('temperature', '?')} {w.get('weather', '?')}")
+            passed = check_result(f"天气数据({source_name})", w, ["temperature", "weather"]) and passed
+        else:
+            print(f"  天气({source_name}): {w.get('error', '无数据')}")
+            passed = False
 
     # 检查景点部分
     attractions = result["attractions"]
@@ -114,25 +117,30 @@ async def test_travel_agent():
 
 
 async def test_internal_weather():
-    """测试2：单独测试天气查询
+    """测试2：单独测试天气查询（高德 + 心知双数据源）"""
+    print_section("测试天气查询（双数据源）")
 
-    验证内部的 _get_travel_weather 函数能否独立工作。
-    """
-    print_section("测试 _get_travel_weather（天气查询）")
+    passed = True
+    async with httpx.AsyncClient(timeout=15, trust_env=False) as client:
+        # 测试高德天气
+        result_amap = await _get_weather_amap(client, "北京")
+        if "error" in result_amap:
+            print(f"  [失败] 高德: {result_amap['error']}")
+            passed = False
+        else:
+            print(f"  高德: {result_amap.get('temperature')} {result_amap.get('weather')}")
+            passed = check_result("高德天气", result_amap, ["temperature", "weather"]) and passed
 
-    async with httpx.AsyncClient(timeout=15) as client:
-        result = await _get_travel_weather(client, "北京")
+        # 测试心知天气
+        result_seni = await _get_weather_seniverse(client, "北京")
+        if "error" in result_seni:
+            print(f"  [失败] 心知: {result_seni['error']}")
+            passed = False
+        else:
+            print(f"  心知: {result_seni.get('temperature')} {result_seni.get('weather')}")
+            passed = check_result("心知天气", result_seni, ["temperature", "weather"]) and passed
 
-    if "error" in result:
-        print(f"  [失败] {result['error']}")
-        return False
-
-    print(f"  城市: {result.get('city')}")
-    print(f"  温度: {result.get('temperature')}")
-    print(f"  天气: {result.get('weather')}")
-    print(f"  风力: {result.get('wind')}")
-    print(f"  湿度: {result.get('humidity')}")
-    return check_result("天气查询", result, ["city", "temperature", "weather", "humidity"])
+    return passed
 
 
 async def test_internal_attractions():

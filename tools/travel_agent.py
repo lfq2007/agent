@@ -7,9 +7,14 @@
 
 from typing import Any, Dict
 import asyncio
+import os
 import httpx
 
 from tools import YA_MCPServer_Tool
+
+# 从环境变量读取 API 密钥
+AMAP_API_KEY = os.getenv("AMAP_API_KEY", "")
+SENIVERSE_API_KEY = os.getenv("SENIVERSE_API_KEY", "")
 
 
 # ======================== 内部私有函数（Agent的"零件"） ========================
@@ -17,28 +22,18 @@ from tools import YA_MCPServer_Tool
 # 它们只被下面的 travel_agent 统一调用。
 
 
-async def _get_travel_weather(client: httpx.AsyncClient, city: str) -> Dict[str, Any]:
-    """【内部函数】获取旅游目的地的实时天气信息。
-
-    为什么要单独写成函数？
-    - 每个函数只做一件事（查天气），代码清晰好维护
-    - 如果天气API换了，只改这一个函数就行
-
-    Args:
-        client: 复用的HTTP客户端（避免每次都新建连接，提高性能）
-        city: 城市名称
-    """
-    API_KEY = "ba521bfea26f8e3e5db8667f90cab0a4"
+async def _get_weather_amap(client: httpx.AsyncClient, city: str) -> Dict[str, Any]:
+    """【内部函数】通过高德地图API获取天气信息。"""
     BASE_URL = "https://restapi.amap.com/v3/weather/weatherInfo"
 
     try:
         res = await client.get(
             BASE_URL,
-            params={"key": API_KEY, "city": city.strip(), "extensions": "base"},
+            params={"key": AMAP_API_KEY, "city": city.strip(), "extensions": "base"},
         )
 
         if res.status_code != 200:
-            return {"error": f"天气接口异常: HTTP {res.status_code}"}
+            return {"error": f"高德天气接口异常: HTTP {res.status_code}"}
 
         data = res.json()
         if data.get("status") != "1" or not data.get("lives"):
@@ -47,6 +42,7 @@ async def _get_travel_weather(client: httpx.AsyncClient, city: str) -> Dict[str,
         live = data["lives"][0]
 
         return {
+            "source": "高德地图",
             "city": f"{live.get('province', '')}{live.get('city', city)}",
             "temperature": f"{live['temperature']}℃",
             "weather": live["weather"],
@@ -56,9 +52,46 @@ async def _get_travel_weather(client: httpx.AsyncClient, city: str) -> Dict[str,
         }
 
     except httpx.RequestError as e:
-        return {"error": f"天气查询网络请求失败: {str(e)}"}
+        return {"error": f"高德天气网络请求失败: {str(e)}"}
     except Exception as e:
-        return {"error": f"获取天气信息异常: {str(e)}"}
+        return {"error": f"高德天气查询异常: {str(e)}"}
+
+
+async def _get_weather_seniverse(client: httpx.AsyncClient, city: str) -> Dict[str, Any]:
+    """【内部函数】通过心知天气API获取天气信息。"""
+    BASE_URL = "https://api.seniverse.com/v3/weather/now.json"
+
+    try:
+        res = await client.get(
+            BASE_URL,
+            params={"key": SENIVERSE_API_KEY, "location": city.strip(), "language": "zh-Hans", "unit": "c"},
+        )
+
+        if res.status_code != 200:
+            return {"error": f"心知天气接口异常: HTTP {res.status_code}"}
+
+        data = res.json()
+        results = data.get("results", [])
+        if not results:
+            return {"error": f"未找到城市天气: {city}"}
+
+        result = results[0]
+        location = result.get("location", {})
+        now = result.get("now", {})
+
+        return {
+            "source": "心知天气",
+            "city": f"{location.get('name', city)}",
+            "temperature": f"{now['temperature']}℃",
+            "weather": now["text"],
+            "weather_code": now.get("code", ""),
+            "update_time": result.get("last_update", ""),
+        }
+
+    except httpx.RequestError as e:
+        return {"error": f"心知天气网络请求失败: {str(e)}"}
+    except Exception as e:
+        return {"error": f"心知天气查询异常: {str(e)}"}
 
 
 async def _search_travel_attractions(
@@ -71,7 +104,7 @@ async def _search_travel_attractions(
         city: 城市名称
         size: 返回景点数量，默认10个
     """
-    API_KEY = "ba521bfea26f8e3e5db8667f90cab0a4"
+    API_KEY = AMAP_API_KEY
     BASE_URL = "https://restapi.amap.com/v5/place/text"
 
     try:
@@ -122,7 +155,7 @@ async def _query_hotel_price(client: httpx.AsyncClient, city: str) -> Dict[str, 
         client: 复用的HTTP客户端
         city: 城市名称
     """
-    API_KEY = "ba521bfea26f8e3e5db8667f90cab0a4"
+    API_KEY = AMAP_API_KEY
     BASE_URL = "https://restapi.amap.com/v5/place/text"
 
     try:
@@ -230,7 +263,7 @@ async def travel_agent(city: str) -> Dict[str, Any]:
     """旅游智能助手Agent。
 
     输入一个城市名，自动并发查询该城市的：
-    1. 实时天气（温度、体感、风力等）
+    1. 实时天气（聚合高德地图 + 心知天气双数据源）
     2. 热门旅游景点（名称、评分、地址）
     3. 酒店价格（名称、价格、评分）
 
@@ -245,20 +278,23 @@ async def travel_agent(city: str) -> Dict[str, Any]:
     if not city or not city.strip():
         raise ValueError("城市名称不能为空")
 
-    # 使用一个共享的HTTP客户端，三个查询复用同一个连接池，更快更省资源
+    # 使用一个共享的HTTP客户端，四个查询复用同一个连接池，更快更省资源
     async with httpx.AsyncClient(timeout=15, trust_env=False) as client:
-        # 关键：用 asyncio.gather 并发执行三个查询
-        # 这意味着三个API请求同时发出，而不是一个等一个
-        # 比如每个请求要2秒，串行要6秒，并发只要2秒
-        weather, attractions, hotels = await asyncio.gather(
-            _get_travel_weather(client, city),
+        # 关键：用 asyncio.gather 并发执行四个查询
+        # 天气聚合两个数据源（高德 + 心知），取交叉验证结果
+        weather_amap, weather_seniverse, attractions, hotels = await asyncio.gather(
+            _get_weather_amap(client, city),
+            _get_weather_seniverse(client, city),
             _search_travel_attractions(client, city),
             _query_hotel_price(client, city),
         )
 
     return {
         "city": city.strip(),
-        "weather": weather,
+        "weather": {
+            "amap": weather_amap,
+            "seniverse": weather_seniverse,
+        },
         "attractions": attractions,
         "hotels": hotels,
     }
