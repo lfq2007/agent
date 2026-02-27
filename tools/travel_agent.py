@@ -28,62 +28,31 @@ async def _get_travel_weather(client: httpx.AsyncClient, city: str) -> Dict[str,
         client: 复用的HTTP客户端（避免每次都新建连接，提高性能）
         city: 城市名称
     """
-    API_KEY = "7966b75c76d34fff9de08a7f94b460ef"
-    API_HOST = "https://k9487tb4p7.re.qweatherapi.com"
+    API_KEY = "ba521bfea26f8e3e5db8667f90cab0a4"
+    BASE_URL = "https://restapi.amap.com/v3/weather/weatherInfo"
 
     try:
-        # 第一步：把城市名转成城市ID（API要求用ID查天气，不能直接用名字）
-        geo_res = await client.get(
-            f"{API_HOST}/geo/v2/city/lookup",
-            params={"location": city.strip(), "key": API_KEY, "lang": "zh"},
+        res = await client.get(
+            BASE_URL,
+            params={"key": API_KEY, "city": city.strip(), "extensions": "base"},
         )
 
-        if geo_res.status_code != 200:
-            return {"error": f"城市查询接口异常: HTTP {geo_res.status_code}"}
+        if res.status_code != 200:
+            return {"error": f"天气接口异常: HTTP {res.status_code}"}
 
-        geo_data = geo_res.json()
-        if geo_data.get("code") != "200" or not geo_data.get("location"):
-            return {"error": f"未找到城市: {city}"}
+        data = res.json()
+        if data.get("status") != "1" or not data.get("lives"):
+            return {"error": f"未找到城市天气: {city}"}
 
-        location = geo_data["location"][0]
-        location_id = location["id"]
-        city_display = location.get("name", city.strip())
-        adm1 = location.get("adm1", "")
-        country = location.get("country", "")
-
-        # 第二步：用城市ID查实时天气
-        weather_res = await client.get(
-            f"{API_HOST}/v7/weather/now",
-            params={"location": location_id, "key": API_KEY, "lang": "zh"},
-        )
-
-        if weather_res.status_code != 200:
-            return {"error": f"天气接口异常: HTTP {weather_res.status_code}"}
-
-        weather_data = weather_res.json()
-        if weather_data.get("code") != "200":
-            return {"error": f"天气查询失败: {weather_data}"}
-
-        now = weather_data["now"]
-
-        # 拼接完整地名（如：四川成都, 中国）
-        full_location = city_display
-        if adm1 and adm1 != city_display:
-            full_location = f"{adm1}{city_display}"
-        if country:
-            full_location = f"{full_location}, {country}"
+        live = data["lives"][0]
 
         return {
-            "city": full_location,
-            "temperature": f"{now['temp']}℃",
-            "feels_like": f"{now['feelsLike']}℃",
-            "weather": now["text"],
-            "wind": f"{now['windDir']}{now['windScale']}级",
-            "wind_speed": f"{now['windSpeed']}公里/小时",
-            "humidity": f"{now['humidity']}%",
-            "pressure": f"{now['pressure']}hPa",
-            "visibility": f"{now['vis']}公里",
-            "update_time": weather_data.get("updateTime", ""),
+            "city": f"{live.get('province', '')}{live.get('city', city)}",
+            "temperature": f"{live['temperature']}℃",
+            "weather": live["weather"],
+            "wind": f"{live['winddirection']}风{live['windpower']}级",
+            "humidity": f"{live['humidity']}%",
+            "update_time": live.get("reporttime", ""),
         }
 
     except httpx.RequestError as e:
@@ -102,7 +71,7 @@ async def _search_travel_attractions(
         city: 城市名称
         size: 返回景点数量，默认10个
     """
-    API_KEY = "b69799f7f3f6b4c7a714a4a40e79a39c"
+    API_KEY = "ba521bfea26f8e3e5db8667f90cab0a4"
     BASE_URL = "https://restapi.amap.com/v5/place/text"
 
     try:
@@ -153,7 +122,7 @@ async def _query_hotel_price(client: httpx.AsyncClient, city: str) -> Dict[str, 
         client: 复用的HTTP客户端
         city: 城市名称
     """
-    API_KEY = "b69799f7f3f6b4c7a714a4a40e79a39c"
+    API_KEY = "ba521bfea26f8e3e5db8667f90cab0a4"
     BASE_URL = "https://restapi.amap.com/v5/place/text"
 
     try:
@@ -277,7 +246,7 @@ async def travel_agent(city: str) -> Dict[str, Any]:
         raise ValueError("城市名称不能为空")
 
     # 使用一个共享的HTTP客户端，三个查询复用同一个连接池，更快更省资源
-    async with httpx.AsyncClient(timeout=15) as client:
+    async with httpx.AsyncClient(timeout=15, trust_env=False) as client:
         # 关键：用 asyncio.gather 并发执行三个查询
         # 这意味着三个API请求同时发出，而不是一个等一个
         # 比如每个请求要2秒，串行要6秒，并发只要2秒
