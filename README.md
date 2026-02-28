@@ -6,9 +6,9 @@
 
 | 姓名 | 学号 | 分工 | 备注 |
 | :--: | :--: | :--: | :--: |
-| 程桦杰  |      |      |      |
-| 罗富卿  |      |      |      |
-| 夏彦康  |      |      |      |
+| 程桦杰  |  U202414682    |  智能体封装，api申请    |      |
+| 罗富卿  |  U202414912    |  api调用框架搭建    |      |
+| 夏彦康  |  U202414707    |  智能排序算法设计，调试    |      |
 
 ### 密钥管理
 
@@ -19,7 +19,6 @@
 | `AMAP_API_KEY` | 高德地图（天气、景点、酒店查询） | https://console.amap.com |
 | `SENIVERSE_API_KEY` | 心知天气（天气查询） | https://www.seniverse.com |
 
-> `.env` 文件已在 `.gitignore` 中忽略，不会被提交到仓库。启动时由 `setup.py` 通过 `python-dotenv` 自动加载。
 
 ### Tool 列表
 
@@ -47,7 +46,7 @@
 
 ### 项目结构
 
-- `core`: 核心业务逻辑（与 MCP 解耦）
+- `core`: 目前未使用，可扩展
 - `tools`: MCP 工具实现
   - `travel_agent.py`: 旅游智能助手 Agent（聚合高德+心知双数据源 + 加权评分排序）
   - `hello_tool.py`: 服务器配置读取工具
@@ -57,13 +56,14 @@
 - `resources`: MCP 资源
   - `travel_resource.py`: 支持城市列表 & 城市详情
 - `modules`: 底层共享工具库（YA_Common、YA_Secrets）
-- `config.yaml`: 服务器元数据与传输配置
-- `.env`: API 密钥配置（不提交到仓库）
+- `config.yaml`: 服务器启动方式设置为 sse
+- `.env`: API 密钥配置
 
 ### 其他需要说明的情况
 
-- **密钥管理**：API 密钥通过环境变量 `AMAP_API_KEY` 和 `SENIVERSE_API_KEY` 传入，由 `.env` 文件管理，启动时通过 `python-dotenv` 自动加载
+- **密钥管理**：API 密钥通过环境变量 `AMAP_API_KEY` 和 `SENIVERSE_API_KEY` 传入，由 `.env` 文件管理
 - **未使用** PyTorch、TensorFlow 等深度学习框架
 - **AI 算法模型**：
   - **加权评分模型（Weighted Scoring Model）**：对景点按等级（国家级/省级/公园等）×0.6 + 距市中心距离×0.4 加权评分排序；对酒店按星级（五星/四星/三星等）×0.5 + 距市中心距离×0.5 加权评分排序。评分维度数据均来自高德 API 返回的真实 `type` 和 `location` 字段
   - **Haversine 距离算法**：根据 POI 经纬度坐标与城市中心坐标，通过 Haversine 公式计算球面距离（公里），作为加权评分的距离维度输入
+- **可拓展方向**：原计划对景点和酒店采用 TF-IDF + 聚类算法（如 K-Means）进行自动分类展示（如将景点分为"历史古迹类"、"自然风光类"、"主题乐园类"等），但由于高德免费版 API 返回的 POI 类型字段（`type`）类别单一、文本数据量不足以支撑有效的文本特征提取和聚类，故未采用。后续如接入更丰富的数据源（如用户评论、景点详情），可扩展实现此功能
