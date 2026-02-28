@@ -2,7 +2,6 @@
 /**/.venv/**
 /**/__pycache__/**
 /**/uv.lock
-/**/.env
 /**/*.py[oc]
 /**/build/
 /**/dist/
